@@ -53,7 +53,7 @@ if (DirectX_D3D11_4_INCLUDE_FOUND)
         DirectXTex/DirectXTexMipmaps.cpp
         DirectXTex/DirectXTexMisc.cpp
         #DirectXTex/DirectXTexNormalMaps.cpp
-        #DirectXTex/DirectXTexResize.cpp
+        DirectXTex/DirectXTexResize.cpp
         DirectXTex/DirectXTexTGA.cpp
         DirectXTex/DirectXTexUtil.cpp
         DirectXTex/DirectXTexWIC.cpp

@@ -329,26 +329,33 @@ if (WIN32)
         )
     endif ()
 
+    add_library (d3dretrace_common STATIC
+            d3dretrace_ddraw.cpp
+            d3dretrace_d3d8.cpp
+            d3dretrace_d3d9.cpp
+            d3dretrace_dxgi_priv.cpp
+            d3dretrace_ws.cpp
+            d3d9state.cpp
+            d3d9state_formats.cpp
+            d3d9state_images.cpp
+            ${D3DSTATE_SOURCES}
+    )
+    target_link_libraries (d3dretrace_common
+            retrace_common
+            d3dhelpers
+    )
+    if (DirectX_D3D11_4_INCLUDE_FOUND)
+        target_link_libraries (d3dretrace_common directxtex)
+    endif ()
+
     add_executable (d3dretrace
         d3dretrace_main.cpp
-        d3dretrace_ddraw.cpp
-        d3dretrace_d3d8.cpp
-        d3dretrace_d3d9.cpp
-        d3dretrace_dxgi_priv.cpp
-        d3dretrace_ws.cpp
-        d3d9state.cpp
-        d3d9state_formats.cpp
-        d3d9state_images.cpp
         ${D3DSTATE_SOURCES}
     )
     target_link_libraries (d3dretrace
-        retrace_common
-        d3dhelpers
+        d3dretrace_common
         ole32
     )
-    if (DirectX_D3D11_4_INCLUDE_FOUND)
-        target_link_libraries (d3dretrace directxtex)
-    endif ()
 
     install (TARGETS d3dretrace RUNTIME DESTINATION bin)
     install_pdb (d3dretrace DESTINATION bin)

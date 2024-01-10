@@ -82,3 +82,5 @@ endif ()
 
 add_subdirectory (crc32c)
 add_subdirectory (md5)
+
+include_with_scope (imgui.cmake)

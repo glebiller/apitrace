@@ -209,8 +209,9 @@ if (WIN32)
 
         add_custom_command (
             OUTPUT dxgitrace.cpp
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/dxgitrace.py > ${CMAKE_CURRENT_BINARY_DIR}/dxgitrace.cpp
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/dxgiinterceptor.py > ${CMAKE_CURRENT_BINARY_DIR}/dxgitrace.cpp
             DEPENDS
+                dxgiinterceptor.py
                 dxgitrace.py
                 dlltrace.py
                 trace.py
@@ -230,12 +231,21 @@ if (WIN32)
             dxgitrace.cpp
             d3dcommonshader.cpp
         )
+        target_include_directories(dxgitrace PRIVATE
+                ${CMAKE_SOURCE_DIR}/lib/image
+                ${CMAKE_SOURCE_DIR}/lib/interceptor
+                ${CMAKE_SOURCE_DIR}/thirdparty
+        )
         target_link_libraries (dxgitrace
             d3dhelpers
+            d3dretrace_common
+            directxtex
             trace
+            interceptor
         )
         set_target_properties (dxgitrace
             PROPERTIES PREFIX ""
+            RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
         )
         install (TARGETS dxgitrace RUNTIME DESTINATION ${WRAPPER_INSTALL_DIR})
         install_pdb (dxgitrace DESTINATION ${WRAPPER_INSTALL_DIR})
@@ -256,6 +266,7 @@ if (WIN32)
         set_target_properties (dxgistub PROPERTIES
             PREFIX ""
             OUTPUT_NAME "dxgi"
+            LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
         )
         install (TARGETS dxgistub LIBRARY DESTINATION ${WRAPPER_INSTALL_DIR})
 
@@ -282,6 +293,7 @@ if (WIN32)
         set_target_properties (d3d11stub PROPERTIES
             PREFIX ""
             OUTPUT_NAME "d3d11"
+            LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
         )
         install (TARGETS d3d11stub LIBRARY DESTINATION ${WRAPPER_INSTALL_DIR})
     endif ()

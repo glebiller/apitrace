@@ -580,6 +580,7 @@ endmacro ()
 # Common libraries / utilities
 
 include_directories (
+    ${CMAKE_CURRENT_SOURCE_DIR}/lib/reporting
     ${CMAKE_CURRENT_SOURCE_DIR}/lib/trace
     ${CMAKE_CURRENT_SOURCE_DIR}/lib/os
     ${CMAKE_CURRENT_SOURCE_DIR}/compat

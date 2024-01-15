@@ -20,6 +20,13 @@ namespace interceptor {
         ID3D11DeviceContext* pImmediateContext;
     };
 
+    struct Viewport {
+        float width;
+        float height;
+        float topLeftX;
+        float topLeftY;
+    };
+
     struct ExecutionInfo {
         int frame;
         int drawCall;
@@ -28,12 +35,12 @@ namespace interceptor {
     class StateManager {
         Context context{nullptr, nullptr, nullptr, nullptr, nullptr};
         ExecutionInfo currentExecution{0, 0};
+        Viewport currentViewport{0, 0, 0, 0};
         ModelFingerprint currentModel{0, 0, 0, 0 };
         ID3D11Buffer* currentVSConstantBuffer = nullptr;
         D3D11_BUFFER_DESC tmpBufferDesc{};
         DirectX::XMMATRIX viewMatrix{};
         DirectX::XMMATRIX projectionMatrix{};
-        float viewportHeight{}, viewportWidth{};
 
     public:
         /**
@@ -42,6 +49,8 @@ namespace interceptor {
          */
         StateManager();
         ~StateManager();
+
+        void Shutdown();
 
         static LRESULT InterceptWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
@@ -59,6 +68,10 @@ namespace interceptor {
 
         const ModelFingerprint& CurrentModel() const {
             return currentModel;
+        }
+
+        const Viewport& CurrentViewport() const {
+            return currentViewport;
         }
 
         void ReportResourceUpdated(ID3D11Resource* pResource, const void* ptr, size_t size);

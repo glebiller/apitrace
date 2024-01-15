@@ -696,3 +696,5 @@ else ()
 endif ()
 
 include(CPack)
+
+add_subdirectory(test_debugger)

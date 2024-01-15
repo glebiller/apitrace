@@ -6,6 +6,7 @@ add_convenience_library(interceptor
         dumper.cpp
         state_manager.cpp
         debugger.cpp
+        helpers.cpp
 )
 
 target_include_directories(interceptor

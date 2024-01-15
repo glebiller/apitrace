@@ -14,13 +14,28 @@
 
 namespace interceptor {
 
+    static DirectX::XMMATRIX identityMatrix = DirectX::XMMatrixIdentity();
+
     StateManager::StateManager() = default;
 
     StateManager::~StateManager() = default;
 
+    void StateManager::Shutdown() {
+        SetWindowLongPtr(context.window, GWLP_WNDPROC,
+            reinterpret_cast<LONG_PTR>(context.originalWndProc));
+        debugger.Shutdown();
+    }
+
     LRESULT __stdcall StateManager::InterceptWndProc(const HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+        switch (uMsg) {
+            case WM_CLOSE:
+                stateManager.Shutdown();
+            case WM_INPUT:
+                return DefWindowProcA(hWnd, uMsg, wParam, lParam);
+        }
+
         if (Debugger::WndProcHandler(hWnd, uMsg, wParam, lParam)) {
-            return true;
+            return DefWindowProcA(hWnd, uMsg, wParam, lParam);
         }
         return CallWindowProc(stateManager.context.originalWndProc, hWnd, uMsg, wParam, lParam);
     }
@@ -58,12 +73,6 @@ namespace interceptor {
     void StateManager::ReportDraw(UINT IndexCount, UINT StartIndexLocation, INT BaseVertexLocation) {
         currentExecution.drawCall++;
 
-        if (currentModel == TEST || currentModel == JAINA) {
-            /*const auto center = ImVec2(x, y);
-            ImGui::GetBackgroundDrawList()->AddCircle(center, 40, IM_COL32(255, 0, 0, 200), 0, 2);
-            ImGui::GetBackgroundDrawList()->AddCircle(center, 44, IM_COL32(0, 255, 0, 200), 0, 2);*/
-        }
-
         debugger.ReportDraw(IndexCount, StartIndexLocation, BaseVertexLocation);
     }
 
@@ -86,7 +95,11 @@ namespace interceptor {
 
     void StateManager::ReportAfterVSSetConstantBuffers(UINT NumBuffers, ID3D11Buffer* const* ppConstantBuffers) {
         if (ppConstantBuffers && NumBuffers) {
-            currentVSConstantBuffer = ppConstantBuffers[0];
+            if (ID3D11Buffer* pConstantBuffers = ppConstantBuffers[0]) {
+                currentVSConstantBuffer = pConstantBuffers;
+                pConstantBuffers->GetDesc(&tmpBufferDesc);
+                currentModel.vsConstantBufferByteWidth = tmpBufferDesc.ByteWidth;
+            }
         }
     }
 
@@ -102,18 +115,20 @@ namespace interceptor {
     void StateManager::ReportVSConstantBuffersUpdated(const void* ptr, size_t size) {
         constexpr int sizeOfOneRow = 4 * sizeof(float);
         const auto pData = static_cast<const float*>(ptr);
+        std::memcpy(&viewMatrix, pData, 3 * sizeOfOneRow);
         if (size >= 3584) {
-            std::memcpy(&viewMatrix, pData, 3 * sizeOfOneRow);
             std::memcpy(&projectionMatrix, &pData[197 * 4], 4 * sizeOfOneRow);
+        } else {
+            projectionMatrix = DirectX::XMMatrixIdentity();
         }
     }
 
     void StateManager::ReportViewport(UINT NumViewports, const D3D11_VIEWPORT* pViewports) {
         if (NumViewports) {
-            if (pViewports->TopLeftX == 0 && pViewports->TopLeftY == 0) {
-                viewportWidth = pViewports->Width;
-                viewportHeight = pViewports->Height;
-            }
+            currentViewport.width = pViewports->Width;
+            currentViewport.height = pViewports->Height;
+            currentViewport.topLeftX = pViewports->TopLeftX;
+            currentViewport.topLeftY = pViewports->TopLeftY;
         }
     }
 
@@ -133,15 +148,22 @@ namespace interceptor {
 
     DirectX::XMFLOAT2 StateManager::GetCurrentDrawPosition() const {
         const DirectX::XMVECTOR v = DirectX::XMVectorSet(0, 0, 0, 1);
-        DirectX::XMVECTOR worldSpace = DirectX::XMVectorSet(0, 0, 0, 0);
-        worldSpace = DirectX::XMVectorMultiplyAdd(DirectX::XMVectorSplatX(DirectX::XMVector4Dot(viewMatrix.r[0], v)), projectionMatrix.r[0], worldSpace);
-        worldSpace = DirectX::XMVectorMultiplyAdd(DirectX::XMVectorSplatY(DirectX::XMVector4Dot(viewMatrix.r[1], v)), projectionMatrix.r[1], worldSpace);
-        worldSpace = DirectX::XMVectorMultiplyAdd(DirectX::XMVectorSplatZ(DirectX::XMVector4Dot(viewMatrix.r[2], v)), projectionMatrix.r[2], worldSpace);
-        worldSpace = DirectX::XMVectorMultiplyAdd(DirectX::XMVectorSplatW(v), projectionMatrix.r[3], worldSpace);
+        DirectX::XMVECTOR screeSpace = DirectX::XMVectorSet(0, 0, 0, 0);
+        if (&projectionMatrix == &identityMatrix) {
+            screeSpace = DirectX::XMVectorMultiplyAdd(DirectX::XMVectorSplatX(v), viewMatrix.r[0], screeSpace);
+            screeSpace = DirectX::XMVectorMultiplyAdd(DirectX::XMVectorSplatY(v), viewMatrix.r[1], screeSpace);
+            screeSpace = DirectX::XMVectorMultiplyAdd(DirectX::XMVectorSplatZ(v), viewMatrix.r[2], screeSpace);
+            screeSpace = DirectX::XMVectorMultiplyAdd(DirectX::XMVectorSplatW(v), viewMatrix.r[3], screeSpace);
+        } else {
+            screeSpace = DirectX::XMVectorMultiplyAdd(DirectX::XMVectorSplatX(DirectX::XMVector4Dot(viewMatrix.r[0], v)), projectionMatrix.r[0], screeSpace);
+            screeSpace = DirectX::XMVectorMultiplyAdd(DirectX::XMVectorSplatY(DirectX::XMVector4Dot(viewMatrix.r[1], v)), projectionMatrix.r[1], screeSpace);
+            screeSpace = DirectX::XMVectorMultiplyAdd(DirectX::XMVectorSplatZ(DirectX::XMVector4Dot(viewMatrix.r[2], v)), projectionMatrix.r[2], screeSpace);
+            screeSpace = DirectX::XMVectorMultiplyAdd(DirectX::XMVectorSplatW(v), projectionMatrix.r[3], screeSpace);
+        }
 
         return DirectX::XMFLOAT2(
-            worldSpace.m128_f32[0] / worldSpace.m128_f32[3] * (viewportWidth / 2.0f) + viewportWidth / 2.0f,
-            viewportHeight / 2.0f - worldSpace.m128_f32[1] / worldSpace.m128_f32[3] * (viewportHeight / 2.0f)
+             currentViewport.topLeftX + (screeSpace.m128_f32[0] / screeSpace.m128_f32[3] * (currentViewport.width / 2.0f) + currentViewport.width / 2.0f),
+            currentViewport.topLeftY + (currentViewport.height / 2.0f - screeSpace.m128_f32[1] / screeSpace.m128_f32[3] * (currentViewport.height / 2.0f))
             );
     }
 

@@ -9,25 +9,31 @@
 #include "image.hpp"
 
 namespace interceptor {
-    static image::Image* getRenderTargetViewImage(ID3D11DeviceContext* pDevice,
-                             ID3D11RenderTargetView* pRenderTargetView,
+    static void getRenderTargetViewImage(ID3D11Device* pDevice, ID3D11DeviceContext* pDeviceContext,
+                             ID3D11RenderTargetView* pRenderTargetView, DirectX::ScratchImage* pDstImage,
                              DXGI_FORMAT* dxgiFormat) {
         if (!pRenderTargetView) {
-            return nullptr;
+            return;
         }
 
-        Microsoft::WRL::ComPtr<ID3D11Resource> pResource;
+        ID3D11Resource* pResource;
         pRenderTargetView->GetResource(&pResource);
-        assert(pResource);
 
-        D3D11_RENDER_TARGET_VIEW_DESC Desc;
-        pRenderTargetView->GetDesc(&Desc);
+        if (pResource) {
+            ID3D11Texture2D* pTexture;
+            if (HRESULT hr = pResource->QueryInterface<ID3D11Texture2D>(&pTexture); SUCCEEDED(hr)) {
+                CaptureTexture(pDevice, pDeviceContext, pTexture, *pDstImage);
+            }
 
-        if (dxgiFormat) {
-            *dxgiFormat = Desc.Format;
+            if (pTexture) {
+                pTexture->Release();
+            }
+        }
+        if (pResource) {
+            pResource->Release();
         }
 
-        // TODO: Take the slice in consideration
+        /*// TODO: Take the slice in consideration
         UINT MipSlice;
         switch (Desc.ViewDimension) {
             case D3D11_RTV_DIMENSION_BUFFER:
@@ -60,67 +66,78 @@ namespace interceptor {
                 return nullptr;
         }
 
-        return d3dstate::getSubResourceImage(pDevice, pResource.Get(), Desc.Format, 0, MipSlice);
+        return d3dstate::getSubResourceImage(pDevice, pResource.Get(), Desc.Format, 0, MipSlice);*/
     }
 
-    DirectX::ScratchImage* ResizeImage(const image::Image* srcImage, const int maxWidth) {
+    void CopyToScratchImage(const image::Image* srcImage, DirectX::ScratchImage* dstImage) {
+        dstImage->Initialize2D(DXGI_FORMAT_R8G8B8A8_UNORM, srcImage->width, srcImage->height, 1, 1);
+        memcpy(dstImage->GetPixels(), srcImage->pixels, srcImage->sizeInBytes());
+        for (size_t x = 0; x < dstImage->GetPixelsSize(); x += 4) {
+            dstImage->GetPixels()[x + 3] = 255;
+        }
+    }
+
+    void ResizeImage(const image::Image* srcImage, DirectX::ScratchImage* dstImage, const int maxWidth) {
         assert(srcImage->channelType == image::TYPE_UNORM8);
 
         const double aspectRatio = static_cast<double>(srcImage->width) / srcImage->height;
         const auto newHeight = static_cast<unsigned int>(maxWidth / aspectRatio);
 
-        auto* originalImage = new DirectX::ScratchImage();
-        originalImage->Initialize2D(DXGI_FORMAT_R8G8B8A8_UNORM, srcImage->width, srcImage->height, 1, 1);
-        memcpy(originalImage->GetPixels(), srcImage->pixels, srcImage->sizeInBytes());
-        for (size_t x = 0; x < originalImage->GetPixelsSize(); x += 4) {
-            originalImage->GetPixels()[x + 3] = 255;
-        }
-
         if (srcImage->width < maxWidth || srcImage->height == 0) {
-            return originalImage;
+            CopyToScratchImage(srcImage, dstImage);
+        } else {
+            auto* originalImage = new DirectX::ScratchImage();
+            CopyToScratchImage(srcImage, originalImage);
+            Resize(originalImage->GetImages(), originalImage->GetImageCount(), originalImage->GetMetadata(), maxWidth, newHeight, DirectX::TEX_FILTER_DEFAULT, *dstImage);
         }
-        auto* resizedScratch = new DirectX::ScratchImage();
-        Resize(originalImage->GetImages(), originalImage->GetImageCount(), originalImage->GetMetadata(), maxWidth, newHeight, DirectX::TEX_FILTER_DEFAULT, *resizedScratch);
-        return resizedScratch;
     }
 
-    std::string GetRenderTargetInBase64(ID3D11DeviceContext* pDevice) {
-        if (pDevice->GetType() == D3D11_DEVICE_CONTEXT_DEFERRED) {
-            return base64::to_base64("");
+    std::string GetRenderTargetInBase64(ID3D11Device* pDevice, ID3D11DeviceContext* pDeviceContext) {
+        if (pDeviceContext->GetType() == D3D11_DEVICE_CONTEXT_DEFERRED) {
+            return "";
         }
 
-        ID3D11RenderTargetView* pRenderTargetViews[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT];
+        ID3D11RenderTargetView* pRenderTargetView;
         ID3D11DepthStencilView* pDepthStencilView;
-        pDevice->OMGetRenderTargets(ARRAYSIZE(pRenderTargetViews), pRenderTargetViews,
-                                    &pDepthStencilView);
+        pDeviceContext->OMGetRenderTargets(1, &pRenderTargetView, &pDepthStencilView);
 
-        for (UINT i = 0; i < ARRAYSIZE(pRenderTargetViews); ++i) {
-            if (!pRenderTargetViews[i]) {
-                continue;
-            }
-
-            DXGI_FORMAT dxgiFormat;
-            if (const image::Image* image = getRenderTargetViewImage(pDevice, pRenderTargetViews[i],
-                                                                     &dxgiFormat)) {
-#ifdef DUMPER_RESIZED_IMAGE
-                const DirectX::ScratchImage* resizedImage = ResizeImage(image, 512);
-                DirectX::Blob pngImage;
-                SaveToWICMemory(*resizedImage->GetImages(), DirectX::WIC_FLAGS_NONE,
-                GetWICCodec(DirectX::WIC_CODEC_JPEG), pngImage);
-                delete image;
-                pRenderTargetViews[i]->Release();
-                return  base64::to_base64(std::string(static_cast<const char*>(pngImage.GetBufferPointer()), pngImage.GetBufferSize()));
-#else
-                std::stringstream pngImage;
-                image->writePNG(pngImage, true);
-                delete image;
-                pRenderTargetViews[i]->Release();
-                return base64::to_base64(pngImage.str());
-#endif
-            }
-            pRenderTargetViews[i]->Release();
+        if (!pRenderTargetView) {
+            return "no target view";
         }
 
-        return "";
+        DirectX::Blob pngImage;
+        auto* pScratchImage = new DirectX::ScratchImage();
+        getRenderTargetViewImage(pDevice, pDeviceContext, pRenderTargetView, pScratchImage, nullptr);
+
+        if (pRenderTargetView) {
+            pRenderTargetView->Release();
+        }
+        if (pDepthStencilView) {
+            pDepthStencilView->Release();
+        }
+
+#ifdef DUMPER_RESIZED_IMAGE
+        ResizeImage(image, scratchImage, 512);
+#endif
+        if (pScratchImage->GetImageCount() > 0) {
+            const HRESULT hr = SaveToWICMemory(*pScratchImage->GetImages(), DirectX::WIC_FLAGS_NONE, GetWICCodec(DirectX::WIC_CODEC_JPEG), pngImage);
+            assert(SUCCEEDED(hr));
+            delete pScratchImage;
+        }
+
+        /*if (const image::Image* image = getRenderTargetViewImage(pDevice, pDeviceContext, pRenderTargetViews, nullptr)) {
+            auto* scratchImage = new DirectX::ScratchImage();
+#ifdef DUMPER_RESIZED_IMAGE
+            ResizeImage(image, scratchImage, 512);
+#else
+            CopyToScratchImage(image, scratchImage);
+#endif
+            delete image;
+
+            SaveToWICMemory(*scratchImage->GetImages(), DirectX::WIC_FLAGS_NONE, GetWICCodec(DirectX::WIC_CODEC_JPEG), pngImage);
+            delete scratchImage;
+        }*/
+
+        return  base64::to_base64(std::string(static_cast<const char*>(pngImage.GetBufferPointer()), pngImage.GetBufferSize()));
     }
 }

@@ -46,7 +46,7 @@ if (DirectX_D3D11_4_INCLUDE_FOUND)
         DirectXTex/BC.cpp
         DirectXTex/DirectXTexCompress.cpp
         DirectXTex/DirectXTexConvert.cpp
-        #DirectXTex/DirectXTexD3D11.cpp
+        DirectXTex/DirectXTexD3D11.cpp
         #DirectXTex/DirectXTexDDS.cpp
         #DirectXTex/DirectXTexFlipRotate.cpp
         DirectXTex/DirectXTexImage.cpp

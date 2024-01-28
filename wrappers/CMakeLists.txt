@@ -233,6 +233,7 @@ if (WIN32)
         )
         target_include_directories(dxgitrace PRIVATE
                 ${CMAKE_SOURCE_DIR}/lib/image
+                ${CMAKE_SOURCE_DIR}/lib/debugger
                 ${CMAKE_SOURCE_DIR}/lib/interceptor
                 ${CMAKE_SOURCE_DIR}/thirdparty
         )
@@ -241,6 +242,7 @@ if (WIN32)
             d3dretrace_common
             directxtex
             trace
+            debugger
             interceptor
         )
         set_target_properties (dxgitrace

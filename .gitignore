@@ -63,3 +63,4 @@ version.h
 .DS_Store
 .idea
 cmake-build-*
+.vs

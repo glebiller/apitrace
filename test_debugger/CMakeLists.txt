@@ -19,6 +19,7 @@ endif()
 
 target_link_libraries(test_debugger
         dxgitrace
+        debugger
         interceptor
         image
         imgui

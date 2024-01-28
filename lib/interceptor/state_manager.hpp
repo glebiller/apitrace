@@ -4,15 +4,28 @@
 
 #pragma once
 
+#include <array>
 #include <d3d11.h>
-#include <DirectXMath.h>
 #include <dxgi.h>
+#include <unordered_map>
 
-#include "models_fingerprints.hpp"
+#include "model_fingerprint.hpp"
+#include "model_instance.hpp"
+#include "types.hpp"
 
 namespace interceptor {
+    // TODO remove
+    struct InstanceState {
+        DirectX::XMVECTOR originOffset{};
+        DirectX::XMVECTOR boundingBoxSize{};
+    };
 
-    struct Context {
+    using ModelFingerprintsMap = std::unordered_map<ModelFingerprintHash, ModelFingerprint>;
+    using ModelInstancesMap = std::unordered_map<ModelInstanceHash, ModelInstance>;
+    using ModelFingerprintsInstancesMap = std::unordered_map<ModelFingerprintHash, ModelInstancesMap>;
+    using InputLayoutsMap = std::unordered_map<const ID3D11InputLayout*, std::vector<D3D11_INPUT_ELEMENT_DESC>>;
+
+    struct DirectXContext {
         HWND window;
         WNDPROC originalWndProc;
         IDXGISwapChain* pSwapChain;
@@ -20,27 +33,28 @@ namespace interceptor {
         ID3D11DeviceContext* pImmediateContext;
     };
 
-    struct Viewport {
-        float width;
-        float height;
-        float topLeftX;
-        float topLeftY;
-    };
-
-    struct ExecutionInfo {
-        int frame;
-        int drawCall;
-    };
-
     class StateManager {
-        Context context{nullptr, nullptr, nullptr, nullptr, nullptr};
+        // TODO do not use struct?
+        DirectXContext directXContext{nullptr, nullptr, nullptr, nullptr, nullptr};
         ExecutionInfo currentExecution{0, 0};
-        Viewport currentViewport{0, 0, 0, 0};
-        ModelFingerprint currentModel{0, 0, 0, 0 };
-        ID3D11Buffer* currentVSConstantBuffer = nullptr;
-        D3D11_BUFFER_DESC tmpBufferDesc{};
-        DirectX::XMMATRIX viewMatrix{};
-        DirectX::XMMATRIX projectionMatrix{};
+
+        ID3D11InputLayout* currentIAInputLayout = nullptr;
+        UINT currentIAVertexBufferStrides = 0;
+        UINT currentIAVertexBufferOffsets = 0;
+        DXGI_FORMAT currentIAIndexBufferFormat = DXGI_FORMAT_UNKNOWN;
+        UINT currentIAIndexBufferOffset = 0;
+        ID3D11Buffer* currentIAIndexBuffer = nullptr;
+        std::array<ID3D11Buffer*, 32> currentIAVertexBuffers = {};
+        std::array<ID3D11Buffer*, 15> currentVSConstantBuffers = {};
+        std::array<ID3D11Buffer*, 15> currentPSConstantBuffers = {};
+        std::array<ID3D11ShaderResourceView*, 128> currentPsShaderResourceViews = {};
+        Viewport currentViewport{ 0, 0, 0, 0 };
+
+        ModelFingerprintsMap modelFingerprints;
+        ModelFingerprintsInstancesMap modelFingerprintsInstances;
+
+        std::unordered_map<const ID3D11Buffer*, D3D11_BUFFER_DESC> bufferDescs;
+        InputLayoutsMap inputLayouts;
 
     public:
         /**
@@ -50,66 +64,60 @@ namespace interceptor {
         StateManager();
         ~StateManager();
 
-        void Shutdown();
-
         static LRESULT InterceptWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
-        const Context& Context() const {
-            return context;
-        }
-
-        const ExecutionInfo& CurrentExecution() const {
-            return currentExecution;
-        }
-
-        int CurrentFrame() const {
-            return currentExecution.frame;
-        }
-
-        const ModelFingerprint& CurrentModel() const {
-            return currentModel;
-        }
-
-        const Viewport& CurrentViewport() const {
-            return currentViewport;
-        }
-
-        void ReportResourceUpdated(ID3D11Resource* pResource, const void* ptr, size_t size);
+        void Shutdown();
 
         void ReportBeforePresent();
 
         void ReportAfterPresent();
 
-        void SetContext(IDXGISwapChain* idxgi_swap_chain, const DXGI_SWAP_CHAIN_DESC* dxgi_swap_chain_desc,
-                        ID3D11Device* pp_device, ID3D11DeviceContext* id_3d_11device_context);
+        void SetContext(IDXGISwapChain* pSwapChain, const DXGI_SWAP_CHAIN_DESC* pSwapChainDesc,
+                        ID3D11Device* pDevice, ID3D11DeviceContext* pImmediateContext);
 
-        void ReportDraw(UINT IndexCount, UINT StartIndexLocation, INT BaseVertexLocation);
+        void ReportAfterCreateInputLayout(const D3D11_INPUT_ELEMENT_DESC* pInputElementDescs, UINT NumElements, const void* pShaderBytecodeWithInputSignature, SIZE_T BytecodeLength, const ID3D11InputLayout* pInputLayout);
 
-        void ReportIASetVertexBuffers(UINT stride, UINT NumBuffers, ID3D11Buffer* const* ppVertexBuffers);
+        void ReportIASetInputLayout(ID3D11InputLayout* pInputLayout);
 
-        void ReportIASetIndexBuffer(ID3D11Buffer* pIndexBuffer);
+        void ReportIASetVertexBuffers(UINT StartSlot, UINT NumBuffers, ID3D11Buffer* const* ppVertexBuffers,
+                                      UINT strides, UINT offsets);
 
-        void ReportAfterVSSetConstantBuffers(UINT NumBuffers, ID3D11Buffer* const* ppConstantBuffers);
+        void ReportIASetIndexBuffer(ID3D11Buffer* pIndexBuffer, DXGI_FORMAT Format, UINT Offset);
 
-        void ReportAfterPSSetConstantBuffers(UINT NumBuffers, ID3D11Buffer* const* ppConstantBuffers);
+        void ReportAfterVSSetConstantBuffers(UINT StartSlot, UINT NumBuffers, ID3D11Buffer* const* ppConstantBuffers);
 
-        void ReportVSConstantBuffersUpdated(const void *ptr, size_t size);
+        void ReportAfterPSSetConstantBuffers(UINT StartSlot, UINT NumBuffers, ID3D11Buffer* const* ppConstantBuffers);
 
-        void ReportViewport(UINT NumViewports, const D3D11_VIEWPORT* pViewports);
+        void ReportAfterPSSetShaderResources(UINT StartSlot, UINT NumViews,
+                                             ID3D11ShaderResourceView* const* ppShaderResourceViews);
 
-        void ReportMap(ID3D11Resource * pResource, UINT Subresource, D3D11_MAP MapType, UINT MapFlags, D3D11_MAPPED_SUBRESOURCE * pMappedResource);
+        void ReportAfterRSSetViewports(UINT NumViewports, const D3D11_VIEWPORT* pViewports);
 
-        void ReportBeforeUnmap(ID3D11Resource * pResource, UINT Subresource);
-        void ReportAfterUnmap(ID3D11Resource * pResource, UINT Subresource);
+        bool ReportBeforeDrawIndexed(UINT IndexCount, UINT StartIndexLocation, INT BaseVertexLocation);
 
-        bool ShouldShadowMap(const ID3D11Resource * pResource, UINT Subresource) const;
+        void ClearModelFingerprints();
 
-        DirectX::XMFLOAT2 GetCurrentDrawPosition() const;
+        void ClearModelFingerprintsInstances();
+
+        void Import();
+
+        void Export();
+
+        ModelFingerprintsMap& GetModelFingerprints() {
+            return modelFingerprints;
+        }
+
+        ModelFingerprintsInstancesMap& GetModelFingerprintsInstances() {
+            return modelFingerprintsInstances;
+        }
+
+        InputLayoutsMap GetInputLayouts() {
+            return inputLayouts;
+        }
     };
 
     /**
      * Singleton.
      */
     extern StateManager stateManager;
-
 }
